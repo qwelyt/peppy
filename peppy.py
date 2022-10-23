@@ -10,9 +10,11 @@ import cadquery as cq
 #}
 
 def row(thing):
+    y = 16.09
+    z = 5.85
     return (thing
-       + thing.rotate((0,0,0),(1,0,0),40).translate((0,16,5.85))
-       + thing.rotate((0,0,0),(1,0,0),-40).translate((0,-16,5.85))
+       + thing.rotate((0,0,0),(1,0,0),40).translate((0,y,z))
+       + thing.rotate((0,0,0),(1,0,0),-40).translate((0,-y,z))
       )
 
 s = 18.2
@@ -45,9 +47,9 @@ index = r.translate((-s,-s/4,0))
 long = r
 ring = r.translate((s,-s/2,0))
 pinky = r.translate((s*2,-s,0))
-thumb = (r.rotate((0,0,0),(1,0,0),80)
-        .rotate((0,0,0),(0,0,1),-70)
-        .translate((-s*2,-s*1.2,-s))
+thumb = (r.rotate((0,0,0),(1,0,0),30)
+        .rotate((0,0,0),(0,0,1),-60)
+        .translate((-s*1.5,-s*1.5,0))
         )
 
 il = cq.Solid.makeLoft([
@@ -76,13 +78,29 @@ mm = cq.Solid.makeLoft([
 
 
 
-module = ( index
+module = (( index
         + long
         + ring
         + pinky
-#        + thumb
         +cq.Workplane().add(il).add(lr).add(rp)
-        ).add(mm)
+        )#.rotate((0,0,0),(0,1,0),60)
+        ) #.add(mm)
+
+d = (((module.faces("<<Z[1]")
+        .workplane(centerOption="CenterOfMass")
+        .box(s,3,3)
+        )-module)
+        .rotate(module.faces("<<Z[1]").val().Center(), (0,0,1),-40)
+        .rotate(module.faces("<<Z[1]").val().Center(), (0,1,0),20)
+        .translate((1,-16.1,2))
+        )
+debug(d)
+
+#mt = cq.Solid.makeLoft([
+#    module.faces("<<Z[1]").val().outerWire(),
+#    thumb.faces(">Z").val().outerWire()
+#    ])
+module.add(thumb)
 show_object(module)
 #show_object(cq.Workplane().add(il).add(lr).add(rp))#, options={"color":(1,1,0)})
 #show_object(index)
