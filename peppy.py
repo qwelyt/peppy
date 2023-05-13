@@ -1,15 +1,13 @@
 import cadquery as cq
-#from cq_server.ui import ui, show_object, debug
 
-#module chocCut(){
-#  union(){
-#    cube([14,14,moduleZ*2],center=true);
-#    translate([0,14/4,-1])cube([15,4,moduleZ],center=true);
-#    translate([0,-14/4,-1])cube([15,4,moduleZ],center=true);
-#  }
-#}
+# https://cdn-shop.adafruit.com/product-files/5113/CHOC+keyswitch_Kailh-CPG135001D01_C400229.pdf
+choc_skirtXY = (15+2,15+2)
+choc_bottomXY = (13.8, 13.8)
+choc_bottom_hooks = (14.5+1,14.5+1)
+choc_skirt_to_hooks = 0.8+0.1
+moduleZ = 3
 
-def row(thing):
+def col(thing):
     y = 16.09
     z = 5.85
     return (thing
@@ -17,105 +15,47 @@ def row(thing):
        + thing.rotate((0,0,0),(1,0,0),-40).translate((0,-y,z))
       )
 
-s = 18.2
-c = s-2
-wp = (cq.Workplane('XY')
-        .sketch()
-        .rect(c,s)
-        .rect(13.9,13.9, mode='s')
-        .finalize()
-        .extrude(3)
-        .faces("<Z")
-        .workplane()
-        .sketch()
-        .push([(0, -14/2),(0,14/2)])
-        .rect(13.5,2)
-        .finalize()
-        .extrude(-1.7, "cut")
-        )
-choc = (cq.importers.importStep('choc.step')
-              .rotate((0,0,0),(1,0,0),90)
-              .translate((0,0,3.5))
-        )
+def wp():
+    top = cq.Sketch().rect(choc_skirtXY[0], choc_skirtXY[1])
+    bottom = cq.Sketch().rect(choc_skirtXY[0], choc_skirtXY[1]+1.22)
+    return (cq.Workplane()
+            .placeSketch(bottom, top.moved(cq.Location(cq.Vector(0,0,moduleZ))))
+            .loft()
+            .sketch()
+            .rect(choc_bottomXY[0], choc_bottomXY[1])
+            .finalize()
+            .cutThruAll()
+            .faces("<Z")
+            .workplane()
+            .sketch()
+            .rect(choc_bottom_hooks[0], choc_bottom_hooks[1])
+            .finalize()
+            .extrude(-(moduleZ-choc_skirt_to_hooks), "cut")
+            )
 
-bit = wp +choc
+   #   .faces("<Z")
+   #   .workplane()
+   #   .sketch()
+   #   .rect(choc_bottom_hooks[0],choc_bottom_hooks[1])
+   #   .finalize()
+   #   .extrude(-(moduleZ-choc_skirt_to_hooks), "cut")
+   #   )
 
-#show_object(wp)
-#show_object(choc)#, options="{'color':(100,100,100)}")
-r = row(wp)
-index = r.translate((-s,-s/4,0))
-long = r
-ring = r.translate((s,-s/2,0))
-pinky = r.translate((s*2,-s,0))
-thumb = (r.rotate((0,0,0),(1,0,0),30)
-        .rotate((0,0,0),(0,0,1),-60)
-        .translate((-s*1.5,-s*1.5,0))
-        )
+#show_object(wp())
+show_object(col(wp()))
 
-il = cq.Solid.makeLoft([
-    index.faces(">X").val().outerWire(),
-    long.faces("<X").val().outerWire(),
-    ])
+s = 24
+def poly():
+    return (cq.Workplane()
+            .polygon(6,s)
+            .extrude(19)
+            .faces(">Z")
+            .polygon(6,s-3)
+            .cutThruAll()
+            .faces(">Y")
+            .workplane()
+            .rect(100,100)
+            .extrude(-s/2.31, "cut")
+            )
 
-lr = cq.Solid.makeLoft([
-    long.faces(">X").val().outerWire(),
-    ring.faces("<X").val().outerWire(),
-    ])
-rp = cq.Solid.makeLoft([
-    ring.faces(">X").val().outerWire(),
-    pinky.faces("<X").val().outerWire(),
-    ])
-
-
-#show_object(index.faces(">YZ"), options={"color":(0,1,0)})#, name="itz")
-#show_object(cq.Workplane().add(il).faces(">YZ"), options={"color":(0,1,0)})
-
-mm = cq.Solid.makeLoft([
-    index.faces(">YZ").val().outerWire(),
-    cq.Workplane().add(il).faces(">YZ").val().outerWire(),
-    ])
-#show_object(mm)
-
-
-
-module = (( index
-        + long
-        + ring
-        + pinky
-        +cq.Workplane().add(il).add(lr).add(rp)
-        )#.rotate((0,0,0),(0,1,0),60)
-        ) #.add(mm)
-
-d = (((module.faces("<<Z[1]")
-        .workplane(centerOption="CenterOfMass")
-        .box(s,3,3)
-        )-module)
-        .rotate(module.faces("<<Z[1]").val().Center(), (0,0,1),-40)
-        .rotate(module.faces("<<Z[1]").val().Center(), (0,1,0),20)
-        .translate((1,-16.1,2))
-        )
-debug(d)
-
-#mt = cq.Solid.makeLoft([
-#    module.faces("<<Z[1]").val().outerWire(),
-#    thumb.faces(">Z").val().outerWire()
-#    ])
-module.add(thumb)
-show_object(module)
-#show_object(cq.Workplane().add(il).add(lr).add(rp))#, options={"color":(1,1,0)})
-#show_object(index)
-#show_object(thumb)
-#show_object(index.faces("<X"), options={"color":(0,1,0)})
-#show_object(thumb.faces("<<Z[5]"), options={"color":(0,1,0)})
-#a = r.translate((s,0,0))
-#b = r.rotate((0,0,0),(0,0,1),6).translate((-s,-s,0))
-#tb = (a.faces("<X").val().outerWire())
-#tc = (b.faces(">X").val().outerWire())
-#td = [tb, tc]
-#show_object(a+b)
-#show_object(cq.Solid.makeLoft(td), options={"color":(0,0,1)})
-#b1 = cq.Workplane().copyWorkplane(tb).box(s,1.5,10).translate((0,0,s/2))
-#show_object(b)
-
-#show_object(bit.rotate((0,0,0),(1,0,0),40).translate((0,16,5.85)))
-#show_object(bit.rotate((0,0,0),(1,0,0),-40).translate((0,-16,5.85)))
+#show_object(poly())
