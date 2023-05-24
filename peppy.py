@@ -1,3 +1,4 @@
+import build123d as b3d
 import cadquery as cq
 from functools import reduce
 from copy import copy, deepcopy
@@ -13,14 +14,20 @@ moduleZ = 3
 next_col = choc_skirtXY[0]+0.5
 
 
-def col(thing):
+def col(thing, rotate=True):
     y = 16.8
-    z = 4.5
-    angle = 30
+    if rotate:
+        y = 16.8
+        z = 4.5
+        angle = 30
+        return (thing
+           , thing.rotate((0,0,0),(1,0,0),angle).translate((0,y,z))
+           , thing.rotate((0,0,0),(1,0,0),-angle).translate((0,-y,z))
+          )
     return (thing
-       , thing.rotate((0,0,0),(1,0,0),angle).translate((0,y,z))
-       , thing.rotate((0,0,0),(1,0,0),-angle).translate((0,-y,z))
-      )
+            , thing.translate((0,y,0))
+            , thing.translate((0,-y,0))
+            )
 def choc():
     return (cq.importers.importStep('choc.step')
               .rotate((0,0,0),(0,0,1),90)
@@ -54,12 +61,12 @@ def choc_holder(cut=True, switch=None):
             .extrude(-(moduleZ-choc_skirt_to_hooks), "cut")
             )
 
-def block(w):
-    top = cq.Sketch().rect(w, choc_skirtXY[1])
-    bottom = cq.Sketch().rect(w, choc_skirtXY[1]+1.55)
+def block(w=U(1),l=U(1),h=moduleZ):
     return (cq.Workplane()
-            .placeSketch(bottom, top.moved(cq.Location(cq.Vector(0,0,moduleZ))))
-            .loft()
+            .sketch()
+            .rect(l,w)
+            .finalize()
+            .extrude(h)
             )
 
 def _bridge(left,right):
@@ -80,6 +87,17 @@ def bridge(left,right):
         return r
 
     return _bridge(left,right)
+
+def col_placements():
+    def index(c):
+        return c.translate((next_col*0,0,0))
+    def middle(c):
+        return c.translate((next_col*1,U(0.25),0))
+    def ring(c):
+        return c.rotate((0,0,0),(0,0,1),-3).translate((next_col*2.05,0,0))
+    def pinky(c):
+        return c.rotate((0,0,0),(0,0,1),-10).translate((next_col*3.2,-U(0.5),0))
+    return (index, middle, ring, pinky)
 
 def fingers(part):
     _col = col(part)
@@ -103,10 +121,12 @@ def fingers(part):
     solid_col = (_col[0]+_col[1]+_col[2]+c1+c2)
     c = (_col[0],_col[1],_col[2],c1,c2)
 
-    index = (solid_col.translate((next_col*0,0,0)))
-    middle = (solid_col.translate((next_col*1,U(0.25),0)))
-    r = tuple(map(lambda w: w.rotate((0,0,0),(0,0,1),-3).translate((next_col*2.05,0,0)), c))
-    p = tuple(map(lambda w: w.rotate((0,0,0),(0,0,1),-10).translate((next_col*3.2,-U(0.5),0)), c))
+
+    m = col_placements()
+    index = m[0](solid_col)#(solid_col.translate((next_col*0,0,0))) 
+    middle = m[1](solid_col)#(solid_col.translate((next_col*1,U(0.25),0)))
+    r = tuple(map(lambda w: m[2](w), c))
+    p = tuple(map(lambda w: m[3](w), c))
 
     ring = reduce(lambda a,b: a+b, r)
     pinky = reduce(lambda a,b: a+b, p)
@@ -124,36 +144,40 @@ def fingers(part):
             ).clean()
 
 def finger_body():
-    _fingers = fingers()
-    show_object(_fingers)
-    b = block(1)
-    #c = col(block(1))
-    fbb = _fingers.findSolid().BoundingBox()
-    debug(_fingers.faces("<Y or <<X[1]"))
-    #r = _fingers.faces("<X").val().thicken(5)
-    #l = _fingers.faces("<<X[1]").val().thicken(5)
-    #b = _fingers.faces("<Y").val().thicken(5)
-    #show_object(r)
-    #show_object(l)
-    #show_object(b)
+    b = block(U(1)+10, U(1)+10)
+    _col = col(b, False)
+    cp = col_placements()
+    solid = reduce(lambda a,b: a+b, _col)
+    sbb = solid.findSolid().BoundingBox()
+    base = cq.Workplane()
+    for m in cp:
+        base = base + m(solid)
+    w = (cq.Workplane()
+         .sketch()
+         .rect(5, sbb.ylen)
+         .finalize()
+         .extrude(35)
+         )
+    w2 = (cq.Workplane()
+         .sketch()
+         .rect(5, sbb.ylen)
+         .finalize()
+         .extrude(23)
+         )
+    wbb = w.findSolid().BoundingBox()
+    w2 = cp[3](w2.translate((sbb.xlen/2-wbb.xlen/2.5,0,0)))
+    w = w.translate((-sbb.xlen/2+wbb.xlen/2.5,0,0))
+    return (base+w+w2).fillet(1)
 
-#c = col(choc_holder(False))
-#cc = reduce(lambda a,b: a+b, c)
-#p=(lambda t: t.faces(">Y")
-#      .workplane(centerOption="CenterOfMass")
-#      .transformed(rotate=cq.Vector(45,0,0))
-#      .rect(choc_skirtXY[0],moduleZ-0.8)
-#  )
-#debug(p(cc).extrude(-1.1))
-#debug(p(cc).extrude(5))
-#show_object(cc)
+    
 f = (fingers(choc_holder()))
-show_object(f)
-#debug(f.wires().toPending().extrude(2))
-#finger_body()
-#ch = choc_holder().rotate((0,0,0),(1,0,0),-40)
-#chrot = ch.rotate((0,0,0),(0,0,1),-10).translate((next_col*1.6,-10,0))
-#b = bridge(ch,chrot)
-#show_object(ch)
-#show_object(chrot)
-#debug(b)
+#fbb = f.findSolid().BoundingBox()
+#f = f.translate((-fbb.xmax/3-5,5/2,20))
+#show_object(f)
+fm = (f.translate((-4,0,20)).rotate((0,0,0),(0,1,0),10))
+fb = (finger_body())
+fb = fb - fm - fm.translate((-0.2,0,-1))- fm.translate((0,0,0.5))
+show_object(fm)
+show_object(fb)
+
+#show_object(reduce(lambda a,b: a+b, col(choc_holder(False), False)))
