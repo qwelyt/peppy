@@ -1,183 +1,180 @@
-import build123d as b3d
-import cadquery as cq
-from functools import reduce
-from copy import copy, deepcopy
+# %%
+from ocp_vscode import (
+    show,
+    show_object,
+    reset_show,
+    set_port,
+    set_defaults,
+    get_defaults,
+    Camera,
+)
+
+set_port(3939)
+set_defaults(reset_camera=Camera.KEEP)
+
+import build123d as bd
+import math
+
+choc = bd.import_step("choc.step").rotate(bd.Axis.Z, 90)
+
+
+# %%
 def U(amount):
     return 19 * amount
 
-# https://cdn-shop.adafruit.com/product-files/5113/CHOC+keyswitch_Kailh-CPG135001D01_C400229.pdf
-choc_skirtXY = (15+2.5,15+1.5)
-choc_bottomXY = (13.6, 13.6)
-choc_bottom_hooks = (choc_bottomXY[0],14.5+1)
-choc_skirt_to_hooks = 0.8+0.1
-moduleZ = 3
-next_col = choc_skirtXY[0]+0.5
+
+def switch_holder(with_switch=False):
+    thickness = 2
+    with bd.BuildPart() as prt:
+        with bd.BuildSketch():
+            bd.Rectangle(U(1), U(1))
+            bd.Rectangle(14, 14, mode=bd.Mode.SUBTRACT)
+        bd.extrude(amount=thickness)
+        with bd.BuildSketch():
+            bd.Rectangle(15, 15)
+        bd.extrude(amount=thickness - 1, mode=bd.Mode.SUBTRACT)
+        edge0 = (
+            prt.edges()
+            .filter_by(bd.Axis.X)
+            .group_by(bd.Axis.Z)[0]
+            .sort_by(bd.Axis.Y)[0]
+        )
+        edge1 = (
+            prt.edges()
+            .filter_by(bd.Axis.X)
+            .group_by(bd.Axis.Z)[0]
+            .sort_by(bd.Axis.Y)[-1]
+        )
+        edge2 = (
+            prt.edges()
+            .filter_by(bd.Axis.Z)
+            .group_by(bd.Axis.X)[-1]
+            .sort_by(bd.Axis.Y)[-1]
+        )
+        vertex0 = prt.vertices().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[0]
+        vertex1 = prt.vertices().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[-1]
+
+        if with_switch:
+            bd.add(choc.moved(bd.Location((0, 0, thickness))))
+    return prt.part
 
 
-def col(thing, rotate=True):
-    y = 16.8
-    if rotate:
-        y = 16.8
-        z = 4.5
-        angle = 30
-        return (thing
-           , thing.rotate((0,0,0),(1,0,0),angle).translate((0,y,z))
-           , thing.rotate((0,0,0),(1,0,0),-angle).translate((0,-y,z))
-          )
-    return (thing
-            , thing.translate((0,y,0))
-            , thing.translate((0,-y,0))
+def col(angle=30, switch=False):
+    holder = switch_holder(with_switch=switch)
+    back = holder.rotate(bd.Axis.X, -angle)
+    front = holder.rotate(bd.Axis.X, angle)
+
+    back_edge = back.edges().sort_by(bd.Axis.Z)[0]
+    front_edge = front.edges().sort_by(bd.Axis.Z)[0]
+    mid_back_edge = holder.edges().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[0]
+    mid_front_edge = holder.edges().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[-1]
+
+    bd.RigidJoint("back", back, bd.Location(back_edge.center()))
+    bd.RigidJoint("front", front, bd.Location(front_edge.center()))
+
+    bd.RigidJoint("back", holder, bd.Location(mid_back_edge.center()))
+    bd.RigidJoint("front", holder, bd.Location(mid_front_edge.center()))
+
+    holder.joints["back"].connect_to(back.joints["back"])
+    holder.joints["front"].connect_to(front.joints["front"])
+
+    return (
+        back,
+        holder,
+        front,
+    )
+
+
+_col = col(switch=False)
+c0 = _col[0].edges().sort_by(bd.Axis.Z)[0]
+c2 = _col[2].edges().sort_by(bd.Axis.Z)[0]
+c1 = _col[1].edges().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[0]
+show(_col[0], _col[1], _col[2], c0, c2, c1, render_joints=True)
+# %%
+
+
+def bridge(left, right):
+    bridges = []
+    for i in range(len(left)):
+        bridges.append(
+            bd.loft(
+                [
+                    left[i].faces().sort_by(bd.Axis.X)[-1],
+                    right[i].faces().sort_by(bd.Axis.X)[0],
+                ]
             )
-def choc():
-    return (cq.importers.importStep('choc.step')
-              .rotate((0,0,0),(0,0,1),90)
-              .translate((0,0,3.1))
-            )
+        )
+    return bridges
 
-def choc_holder(cut=True, switch=None):
-    top = cq.Sketch().rect(choc_skirtXY[0], choc_skirtXY[1])
-    bottom = cq.Sketch().rect(choc_skirtXY[0], choc_skirtXY[1]+1.55)
-    ret = cq.Workplane()
-    if switch is not None:
-        ret.add(switch)
 
-    base = (cq.Workplane()
-            .placeSketch(bottom, top.moved(cq.Location(cq.Vector(0,0,moduleZ))))
-            .loft()
-            )
-    if not cut:
-        return ret.add(base)
+def fingers():
+    _col = col()
+    size = _col[1].bounding_box().size
+    index = _col
+    middle = tuple(
+        map(lambda s: s.moved(bd.Location((size.X * 1.05, U(0.25), 0))), _col)
+    )
+    ring = tuple(
+        map(
+            lambda s: s.rotate(bd.Axis.Z, -5).moved(
+                bd.Location((size.X * 2.2, U(-0.25), 2.5))
+            ),
+            _col,
+        )
+    )
+    pinky = tuple(
+        map(
+            lambda s: s.rotate(bd.Axis.Z, -10).moved(
+                bd.Location((size.X * 3.3, U(-1.25), 5))
+            ),
+            _col,
+        )
+    )
 
-    return ret.add(base
-            .sketch()
-            .rect(choc_bottomXY[0], choc_bottomXY[1])
-            .finalize()
-            .cutThruAll()
-            .faces("<Z")
-            .workplane()
-            .sketch()
-            .rect(choc_bottom_hooks[0], choc_bottom_hooks[1])
-            .finalize()
-            .extrude(-(moduleZ-choc_skirt_to_hooks), "cut")
-            )
-
-def block(w=U(1),l=U(1),h=moduleZ):
-    return (cq.Workplane()
-            .sketch()
-            .rect(l,w)
-            .finalize()
-            .extrude(h)
-            )
-
-def _bridge(left,right):
-    a = cq.Workplane().add(left).faces(">X").val().outerWire()
-    b = cq.Workplane().add(right).faces("<X").val().outerWire()
-    return cq.Workplane().add(cq.Solid.makeLoft([a,b]))
-
-def bridge(left,right):
-    if (isinstance(left, tuple) or isinstance(left, list)) and (isinstance(right, tuple) or isinstance(right, list)):
-        if len(left) != len(right):
-            raise Exception("The things you want to join must be of the same length")
-        r = cq.Workplane()
-        for i in range(len(left)):
-            a = left[i]#.faces(">X").val().outerWire()
-            b = right[i]#.faces("<X").val().outerWire()
-            r.add(_bridge(a,b))
-
-        return r
-
-    return _bridge(left,right)
-
-def col_placements():
-    def index(c):
-        return c.translate((next_col*0,0,0))
-    def middle(c):
-        return c.translate((next_col*1,U(0.25),0))
-    def ring(c):
-        return c.rotate((0,0,0),(0,0,1),-3).translate((next_col*2.05,0,0))
-    def pinky(c):
-        return c.rotate((0,0,0),(0,0,1),-10).translate((next_col*3.2,-U(0.5),0))
     return (index, middle, ring, pinky)
 
-def fingers(part):
-    _col = col(part)
-    front=(lambda t: t.faces(">Y")
-          .workplane(centerOption="CenterOfMass")
-          .transformed(rotate=cq.Vector(45,0,0))
-          .rect(choc_skirtXY[0],moduleZ-0.8)
-      )
-    back=(lambda t: t.faces("<Y")
-          .workplane(centerOption="CenterOfMass")
-          .transformed(rotate=cq.Vector(45,0,0))
-          .rect(choc_skirtXY[0],moduleZ-0.8)
-      )
-    c1 = (front(_col[1]).extrude(-1.1)
-          + front(_col[1]).extrude(5)
-          )
-    c2 = (back(_col[2]).extrude(-1.1)
-          + back(_col[2]).extrude(5)
-          )
 
-    solid_col = (_col[0]+_col[1]+_col[2]+c1+c2)
-    c = (_col[0],_col[1],_col[2],c1,c2)
+def finger_section():
+    _fingers = fingers()
+    (index, middle, ring, pinky) = _fingers
+    bridges = [bridge(_fingers[i], _fingers[i + 1]) for i in range(len(_fingers) - 1)]
+    with bd.BuildPart() as prt:
+        bd.add(index)
+        bd.add(middle)
+        bd.add(ring)
+        bd.add(pinky)
+        for b in bridges:
+            bd.add(b)
+
+    return prt.part
 
 
-    m = col_placements()
-    index = m[0](solid_col)#(solid_col.translate((next_col*0,0,0))) 
-    middle = m[1](solid_col)#(solid_col.translate((next_col*1,U(0.25),0)))
-    r = tuple(map(lambda w: m[2](w), c))
-    p = tuple(map(lambda w: m[3](w), c))
+def peppy():
+    angle = 35
+    with bd.BuildPart() as thumb:
+        for c in col():
+            bd.add(c)
+    with bd.BuildPart() as prt:
+        bd.add(finger_section())
+        bd.add(
+            thumb.part.rotate(bd.Axis.Z, 115)
+            .rotate(bd.Axis.Y, -angle)
+            .moved(bd.Location((-U(1.5), -U(1.5), -U(1))))
+        )
+    return prt.part.rotate(bd.Axis.Y, angle / 2)
 
-    ring = reduce(lambda a,b: a+b, r)
-    pinky = reduce(lambda a,b: a+b, p)
 
-    im = bridge(index, middle)
-    mr = bridge(middle, ring)
-    rp = bridge(r,p)
+part = peppy()
+# %%
 
-    left = (index.faces("<X").val().thicken(5))
-    right = (pinky.faces("<<X[1]").val().thicken(5))
+fcs = part.faces()
 
-    return (index + middle + ring + pinky
-            + im + mr + rp
-            + left + right
-            ).clean()
+show(
+    # part,
+    finger_section(),
+    # part.faces().sort_by(bd.Axis.X)[10],
+    # col(),
+    # render_joints=True
+)
 
-def finger_body():
-    b = block(U(1)+10, U(1)+10)
-    _col = col(b, False)
-    cp = col_placements()
-    solid = reduce(lambda a,b: a+b, _col)
-    sbb = solid.findSolid().BoundingBox()
-    base = cq.Workplane()
-    for m in cp:
-        base = base + m(solid)
-    w = (cq.Workplane()
-         .sketch()
-         .rect(5, sbb.ylen)
-         .finalize()
-         .extrude(35)
-         )
-    w2 = (cq.Workplane()
-         .sketch()
-         .rect(5, sbb.ylen)
-         .finalize()
-         .extrude(23)
-         )
-    wbb = w.findSolid().BoundingBox()
-    w2 = cp[3](w2.translate((sbb.xlen/2-wbb.xlen/2.5,0,0)))
-    w = w.translate((-sbb.xlen/2+wbb.xlen/2.5,0,0))
-    return (base+w+w2).fillet(1)
-
-    
-f = (fingers(choc_holder()))
-#fbb = f.findSolid().BoundingBox()
-#f = f.translate((-fbb.xmax/3-5,5/2,20))
-#show_object(f)
-fm = (f.translate((-4,0,20)).rotate((0,0,0),(0,1,0),10))
-fb = (finger_body())
-fb = fb - fm - fm.translate((-0.2,0,-1))- fm.translate((0,0,0.5))
-show_object(fm)
-show_object(fb)
-
-#show_object(reduce(lambda a,b: a+b, col(choc_holder(False), False)))
+finger_section().export_stl(__file__.replace(".py", "fingers.stl"))
