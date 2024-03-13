@@ -24,35 +24,15 @@ def U(amount):
 
 
 def switch_holder(with_switch=False):
-    thickness = 2
+    thickness = 3
     with bd.BuildPart() as prt:
         with bd.BuildSketch():
-            bd.Rectangle(U(1), U(1))
+            bd.Rectangle(U(1), U(0.9))
             bd.Rectangle(14, 14, mode=bd.Mode.SUBTRACT)
         bd.extrude(amount=thickness)
         with bd.BuildSketch():
             bd.Rectangle(15, 15)
         bd.extrude(amount=thickness - 1, mode=bd.Mode.SUBTRACT)
-        edge0 = (
-            prt.edges()
-            .filter_by(bd.Axis.X)
-            .group_by(bd.Axis.Z)[0]
-            .sort_by(bd.Axis.Y)[0]
-        )
-        edge1 = (
-            prt.edges()
-            .filter_by(bd.Axis.X)
-            .group_by(bd.Axis.Z)[0]
-            .sort_by(bd.Axis.Y)[-1]
-        )
-        edge2 = (
-            prt.edges()
-            .filter_by(bd.Axis.Z)
-            .group_by(bd.Axis.X)[-1]
-            .sort_by(bd.Axis.Y)[-1]
-        )
-        vertex0 = prt.vertices().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[0]
-        vertex1 = prt.vertices().group_by(bd.Axis.Z)[0].sort_by(bd.Axis.Y)[-1]
 
         if with_switch:
             bd.add(choc.moved(bd.Location((0, 0, thickness))))
@@ -112,12 +92,12 @@ def fingers():
     size = _col[1].bounding_box().size
     index = _col
     middle = tuple(
-        map(lambda s: s.moved(bd.Location((size.X * 1.05, U(0.25), 0))), _col)
+        map(lambda s: s.moved(bd.Location((size.X * 1 + 0.2, U(0.25), 0))), _col)
     )
     ring = tuple(
         map(
             lambda s: s.rotate(bd.Axis.Z, -5).moved(
-                bd.Location((size.X * 2.2, U(-0.25), 2.5))
+                bd.Location((size.X * 2.12, U(-0.2), 2.5))
             ),
             _col,
         )
@@ -125,7 +105,7 @@ def fingers():
     pinky = tuple(
         map(
             lambda s: s.rotate(bd.Axis.Z, -10).moved(
-                bd.Location((size.X * 3.3, U(-1.25), 5))
+                bd.Location((size.X * 3.15, U(-1.1), 5))
             ),
             _col,
         )
@@ -134,47 +114,160 @@ def fingers():
     return (index, middle, ring, pinky)
 
 
-def finger_section():
+def finger_section(bridges=True):
     _fingers = fingers()
     (index, middle, ring, pinky) = _fingers
-    bridges = [bridge(_fingers[i], _fingers[i + 1]) for i in range(len(_fingers) - 1)]
+    _bridges = (
+        [bridge(_fingers[i], _fingers[i + 1]) for i in range(len(_fingers) - 1)]
+        if bridges
+        else []
+    )
     with bd.BuildPart() as prt:
         bd.add(index)
         bd.add(middle)
         bd.add(ring)
         bd.add(pinky)
-        for b in bridges:
+        for b in _bridges:
             bd.add(b)
+
+    return (
+        prt.part,
+        index,
+        middle,
+        ring,
+        pinky,
+    )
+
+
+fs = finger_section(True)
+print("valid: ", fs[0].is_valid())
+show(fs, fs[1][0].faces().sort_by(bd.Axis.X)[0])
+# %%
+
+
+def case(fingers, thumb):
+    bridges = [
+        bd.loft(
+            [
+                thumb[0].faces().sort_by(bd.Axis.Z)[-1],
+                fingers[1][0].faces().sort_by(bd.Axis.Y)[0],
+            ]
+        ),
+        bd.loft(
+            [
+                thumb[0].faces().sort_by(bd.Axis.Y)[-1],
+                fingers[1][0].faces().sort_by(bd.Axis.X)[0],
+            ]
+        ),
+    ]
+    with bd.BuildPart() as prt:
+        for f in fingers:
+            bd.add(f)
+        bd.add(thumb)
 
     return prt.part
 
 
 def peppy():
-    angle = 35
-    with bd.BuildPart() as thumb:
-        for c in col():
-            bd.add(c)
-    with bd.BuildPart() as prt:
-        bd.add(finger_section())
-        bd.add(
-            thumb.part.rotate(bd.Axis.Z, 115)
-            .rotate(bd.Axis.Y, -angle)
-            .moved(bd.Location((-U(1.5), -U(1.5), -U(1))))
+    angle = 30
+    thumb = tuple(
+        map(
+            lambda s: s.rotate(bd.Axis.Z, 115)
+            .rotate(bd.Axis.Y, -angle * 2)
+            .moved(bd.Location((-U(0.75), -U(2.3), -U(0.65)))),
+            _col,
         )
-    return prt.part.rotate(bd.Axis.Y, angle / 2)
+    )
+    _finger_section = finger_section()
 
+    def fix(thing):
+        if isinstance(thing, tuple) or isinstance(thing, list):
+            # print(thing)
+            return tuple(map(lambda p: fix(p), thing))
+        else:
+            # print("lol", thing)
+            return thing.rotate(bd.Axis.Y, angle).rotate(bd.Axis.X, 15)
+
+    return tuple(
+        map(
+            lambda p: fix(p),
+            (
+                case(_finger_section, thumb),
+                _finger_section,
+                thumb,
+            ),
+        )
+    )
+
+
+# %%
 
 part = peppy()
 # %%
+pbb = part[0].bounding_box()
+x = pbb.min.X + pbb.max.X
+y = pbb.min.Y + pbb.max.Y
+z = pbb.min.Z + pbb.max.Z
+loc = bd.Location((-x / 2, -y / 2, -z * 3))
+bbbb = bd.loft(
+    [
+        part[2][0].faces().group_by(bd.Axis.X)[-3].sort_by(bd.Axis.Y)[0],
+        part[1][4][0].faces().sort_by(bd.Axis.Y)[0],
+    ]
+)
+b1 = bd.loft(
+    [
+        part[2][0].faces().sort_by(bd.Axis.Z)[-1],
+        part[1][4][0].faces().sort_by(bd.Axis.X)[0],
+    ]
+)
 
-fcs = part.faces()
+
+ee = []
+for p in part[2]:
+    ee.append(bd.extrude(p.faces().sort_by(bd.Axis.Y)[0], 2))
+    ee.append(bd.extrude(p.faces().sort_by(bd.Axis.Y)[-1], 2))
+for p in part[1][0]:
+    ee.append(bd.extrude(p.faces().sort_by(bd.Axis.X)[0], 2))
+for p in part[1][-1]:
+    ee.append(bd.extrude(p.faces().sort_by(bd.Axis.X)[-1], 2))
+
+p1 = part[1][-1][0] + ee[7]
+
+ll = [
+    bd.loft(
+        [
+            p1.faces().sort_by(bd.Axis.Y)[0],
+            ee[0].faces().sort_by(bd.Axis.X)[4],
+        ]
+    ),
+    bd.loft(
+        [
+            p1.faces().sort_by(bd.Axis.Y)[0],
+            ee[2].faces().sort_by(bd.Axis.X)[4],
+        ]
+    ),
+    bd.loft(
+        [
+            p1.faces().sort_by(bd.Axis.Y)[0],
+            ee[4].faces().sort_by(bd.Axis.X)[4],
+        ]
+    ),
+]
+
 
 show(
-    # part,
-    finger_section(),
-    # part.faces().sort_by(bd.Axis.X)[10],
-    # col(),
+    part[0],
+    bd.Rectangle(pbb.size.X, pbb.size.Y)
+    .moved(bd.Location(pbb.center()))
+    .moved(bd.Location((0, 0, -(10 + pbb.size.Z / 2)))),
+    # part[0].project_to_viewport((0,0,50)),
+    # ll,
+    # ee,
     # render_joints=True
 )
 
-finger_section().export_stl(__file__.replace(".py", "fingers.stl"))
+# part[0].export_stl(__file__.replace(".py", "wThumb.stl"))
+# finger_section()[0].export_stl(__file__.replace(".py", "fingers.stl"))
+
+# %%
